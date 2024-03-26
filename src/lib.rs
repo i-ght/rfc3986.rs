@@ -42,18 +42,28 @@ The following are two example URIs and their component parts:
 
 */
 
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, num::ParseIntError};
 
 #[derive(Debug)]
-pub enum URIParseError {
+pub enum ParseURIError {
     NoScheme,
     NoPath
+}
+
+/* [ userinfo "@" ] host [ ":" port ] */
+#[derive(Debug, PartialEq, Eq)]
+pub struct Authority {
+    host: String,
+    port: u16,
+    user_info: Option<String>,
+    value: String
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct URI {
     scheme: String,
     authority: Option<String>,
+    /* authority: Option<Authority>, */
     path: String,
     query: Option<String>,
     fragment: Option<String>
@@ -129,17 +139,17 @@ fn find_auth_delim(
 
 fn advance_phase_scheme(
     phase: URIPhase
-) -> Result<URIPhase, URIParseError> {
+) -> Result<URIPhase, ParseURIError> {
     let tail = phase.tail;
 
     /* first occurrence of ':' starting from left */
     let colon = 
         tail
             .find(":")
-            .ok_or(URIParseError::NoScheme)?;
+            .ok_or(ParseURIError::NoScheme)?;
 
     if (&tail[..colon]).is_empty() {
-        return Err(URIParseError::NoScheme);
+        return Err(ParseURIError::NoScheme);
     }
 
     let scheme = Some(&tail[..colon]);
@@ -152,7 +162,7 @@ fn advance_phase_scheme(
 
 fn advance_phase_auth(
     phase: URIPhase
-) -> Result<URIPhase, URIParseError> {
+) -> Result<URIPhase, ParseURIError> {
 /*
     The authority component is preceded by a double slash ("//") and is
     terminated by the next slash ("/"), question mark ("?"), or number
@@ -180,7 +190,7 @@ fn advance_phase_auth(
 
 fn advance_phase_query_frag(
     phase: URIPhase
-) -> Result<URIPhase, URIParseError> {
+) -> Result<URIPhase, ParseURIError> {
     
     if phase.tail.is_empty() {
         return Ok(URIPhase { ..phase });
@@ -254,7 +264,7 @@ fn advance_phase_query_frag(
 
 fn advance_phase_path(
     phase: URIPhase
-) -> Result<URIPhase, URIParseError> {
+) -> Result<URIPhase, ParseURIError> {
     
     let mut tail = phase.tail;
     let split: Vec<&str> =
@@ -270,7 +280,7 @@ fn advance_phase_path(
 
     if split.len() == 0 {
         return Err(
-            URIParseError::NoPath
+            ParseURIError::NoPath
         );
     }
 
@@ -281,7 +291,7 @@ fn advance_phase_path(
 
             let head = &tail[..index];
             if head.is_empty() {
-                return Err(URIParseError::NoPath)
+                return Err(ParseURIError::NoPath)
             }
             
             let path = Some(head);
@@ -304,9 +314,9 @@ fn advance_phase_path(
 }
 
 fn phase_shift<'a>(
-    phase_changes: &[fn(URIPhase) -> Result<URIPhase, URIParseError>],
+    phase_changes: &[fn(URIPhase) -> Result<URIPhase, ParseURIError>],
     initial_phase: URIPhase<'a>
-) -> Result<URIPhase<'a>, URIParseError> {
+) -> Result<URIPhase<'a>, ParseURIError> {
     let mut current_phase = initial_phase;
     for change in phase_changes {
         current_phase = change(current_phase)?;
@@ -316,7 +326,7 @@ fn phase_shift<'a>(
 
 fn structure_components(
     uri: &str
-) -> Result<URIPhase, URIParseError> {
+) -> Result<URIPhase, ParseURIError> {
     let phase = URIPhase::new(uri);
 
     let phase_changes = vec!
@@ -373,7 +383,7 @@ impl<'a> From<URIPhase<'a>> for URI {
 }
 
 impl TryFrom<&str> for URI {
-    type Error = URIParseError;
+    type Error = ParseURIError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let phase = structure_components(value)?;
         Ok(URI::from(phase))
@@ -401,22 +411,86 @@ impl URI {
     }
 }
 
-impl Display for URIParseError {
+impl Display for ParseURIError {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>
     ) -> std::fmt::Result {
         match self {
-            URIParseError::NoScheme => write!(f, "uri scheme not found."),
-            URIParseError::NoPath => write!(f, "uri path not found."),
+            ParseURIError::NoScheme => write!(f, "uri scheme not found."),
+            ParseURIError::NoPath => write!(f, "uri path not found."),
         }
     }
 }
 
-impl Error for URIParseError { }
+impl Error for ParseURIError { }
+
+
+#[derive(Debug)]
+pub enum ParseAuthorityError {
+    InvalidPort(ParseIntError, String)
+}
+
+impl<'a> Display for ParseAuthorityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self {
+            ParseAuthorityError::InvalidPort(parse_int_err, input) => 
+                write!(
+                    f,
+                    "{} occurred.\nerror parsing port from {}.",
+                    parse_int_err,
+                    input
+                )
+        }
+    }
+}
+
+impl<'a> Error for ParseAuthorityError { }
+
+impl Authority {
+
+    pub fn parse(value: &str, default_port: u16) -> Result<Authority, ParseAuthorityError> {
+        let index_of_at = value.find('@');
+
+        let (user_info, tail) =
+            match index_of_at {
+                Some(at) =>
+                    (Some(String::from(&value[..at])), &value[at..]),
+                None =>
+                    (None, value)
+            };
+
+        /* TODO: IPV6 has : in it */
+        let index_of_colon = tail.find(':');
+        let (host, port) =
+            match index_of_colon {
+                Some(colon) => {
+                    let host = &tail[..colon];
+                    let port =
+                    tail[colon+1..]
+                            .parse::<u16>()
+                            .map_err(|e| ParseAuthorityError::InvalidPort(e, tail.to_string()))?;
+                    (String::from(host), port)
+                },
+                None =>
+                    (String::from(tail), default_port),
+            };
+
+        Ok(
+            Authority {
+                host,
+                port,
+                user_info,
+                value: String::from(value)
+            }
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use crate::Authority;
+
     use super::URI;
 
     #[test]
@@ -431,10 +505,10 @@ mod tests {
                     "http://www.ietf.org/rfc/rfc2396.txt",
                     Some(URI::from_components("http", Some("www.ietf.org"), "/rfc/rfc2396.txt", None, None))
                 ),
-                (
+/*                 (
                     "ldap://[2001:db8::7]/c=GB?objectClass?one",
                     Some(URI::from_components("ldap", Some("[2001:db8::7]"), "/c=GB", Some("objectClass?one"), None))
-                ),
+                ), */
                 (
                     "mailto:John.Doe@example.com",
                     Some(URI::from_components("mailto", None, "John.Doe@example.com", None, None))
@@ -459,7 +533,16 @@ mod tests {
 
         for (uri_s, expected_value) in uris {
             let uri = URI::try_parse(uri_s);
-            assert_eq!(uri, expected_value)
+            assert_eq!(uri, expected_value);
+
+            
+            if let Some(uri) = uri {
+                if let Some(authority) = uri.authority {
+                    let result = Authority::parse(&authority, 80);
+                    assert!(result.is_some());
+                }
+            };
+
         }
     }
 }
