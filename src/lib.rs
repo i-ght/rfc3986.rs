@@ -423,14 +423,38 @@ mod tests {
     fn exec() {
         let uris: Vec<(&str, Option<URI>)> = 
             vec! [
-                ("ftp://ftp.is.co.za/rfc/rfc1808.txt", Some(URI::from_components("ftp", Some("ftp.is.co.za"), "/rfc/rfc1808.txt", None, None))),
-                ("http://www.ietf.org/rfc/rfc2396.txt", Some(URI::from_components("http", Some("www.ietf.org"), "/rfc/rfc2396.txt", None, None))),
-                ("ldap://[2001:db8::7]/c=GB?objectClass?one", Some(URI::from_components("ldap", Some("[2001:db8::7]"), "/c=GB", Some("objectClass?one"), None))),
-                ("mailto:John.Doe@example.com", Some(URI::from_components("mailto", None, "John.Doe@example.com", None, None))),
-                ("news:comp.infosystems.www.servers.unix", Some(URI::from_components("news", None, "comp.infosystems.www.servers.unix", None, None))),
-                ("tel:+1-816-555-1212", Some(URI::from_components("tel", None, "+1-816-555-1212", None, None))),
-                ("telnet://192.0.2.16:80/", Some(URI::from_components("telnet", Some("192.0.2.16:80"), "/", None, None))),
-                ("urn:oasis:names:specification:docbook:dtd:xml:4.1.2", Some(URI::from_components("urn", None, "oasis:names:specification:docbook:dtd:xml:4.1.", None, None)))
+                (
+                    "ftp://ftp.is.co.za/rfc/rfc1808.txt",
+                    Some(URI::from_components("ftp", Some("ftp.is.co.za"), "/rfc/rfc1808.txt", None, None))
+                ),
+                (
+                    "http://www.ietf.org/rfc/rfc2396.txt",
+                    Some(URI::from_components("http", Some("www.ietf.org"), "/rfc/rfc2396.txt", None, None))
+                ),
+                (
+                    "ldap://[2001:db8::7]/c=GB?objectClass?one",
+                    Some(URI::from_components("ldap", Some("[2001:db8::7]"), "/c=GB", Some("objectClass?one"), None))
+                ),
+                (
+                    "mailto:John.Doe@example.com",
+                    Some(URI::from_components("mailto", None, "John.Doe@example.com", None, None))
+                ),
+                (
+                    "news:comp.infosystems.www.servers.unix",
+                    Some(URI::from_components("news", None, "comp.infosystems.www.servers.unix", None, None))
+                ),
+                (
+                    "tel:+1-816-555-1212",
+                    Some(URI::from_components("tel", None, "+1-816-555-1212", None, None))
+                ),
+                (
+                    "telnet://192.0.2.16:80/",
+                    Some(URI::from_components("telnet", Some("192.0.2.16:80"), "/", None, None))
+                ),
+                (
+                    "urn:oasis:names:specification:docbook:dtd:xml:4.1.2",
+                    Some(URI::from_components("urn", None, "oasis:names:specification:docbook:dtd:xml:4.1.2", None, None))
+                )
             ];
 
         for (uri_s, expected_value) in uris {
