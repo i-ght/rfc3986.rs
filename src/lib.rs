@@ -539,7 +539,7 @@ mod tests {
             if let Some(uri) = uri {
                 if let Some(authority) = uri.authority {
                     let result = Authority::parse(&authority, 80);
-                    assert!(result.is_some());
+                    assert!(result.is_ok());
                 }
             };
 
