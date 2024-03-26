@@ -2,7 +2,7 @@ use rfc3986::URI;
 
 fn main() {
     let uris = vec! [
-        ":",
+        "hello:",
         "http://httpbin.org/1/2/3?a=0&b=1&c=2",
         "http://httpbin.org/1/2/3?q1=1&q2=2#okayy",
         "http://httpbin.org/1/2/3",

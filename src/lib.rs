@@ -22,12 +22,6 @@
          / \ /                        \
          urn:example:animal:ferret:nose
 
-*/
-
-use std::{error::Error, fmt::Display};
-
-
-/* 
 URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
 
 The scheme and path components are required, though the path may be
@@ -47,24 +41,44 @@ The following are two example URIs and their component parts:
          urn:example:animal:ferret:nose
 
 */
+
+use std::{error::Error, fmt::Display};
+
 #[derive(Debug)]
 pub enum URIParseError {
     NoScheme,
     NoPath
 }
 
-impl Display for URIParseError {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>
-    ) -> std::fmt::Result {
-        match self {
-            URIParseError::NoScheme => write!(f, "uri scheme not found."),
-            URIParseError::NoPath => write!(f, "uri path not found."),
-        }
-    }
+#[derive(Debug, PartialEq, Eq)]
+pub struct URI {
+    scheme: String,
+    authority: Option<String>,
+    path: String,
+    query: Option<String>,
+    fragment: Option<String>
 }
-impl Error for URIParseError { }
+
+enum URIQueryOrFragment {
+    Query,
+    Fragment
+}
+
+enum URIQueryOrFragmentOrEither {
+    Query,
+    Fragment,
+    Either
+}
+
+#[derive(Debug)]
+struct URIPhase<'a> {
+    tail: &'a str,
+    scheme: Option<&'a str>,
+    authority: Option<&'a str>,
+    path: Option<&'a str>,
+    query: Option<&'a str>,
+    fragment: Option<&'a str>
+}
 
 fn find_next_opt_component(
     q_or_f: URIQueryOrFragmentOrEither,
@@ -118,7 +132,7 @@ fn advance_phase_scheme(
 ) -> Result<URIPhase, URIParseError> {
     let tail = phase.tail;
 
-    /* first occurence of ':' starting from left */
+    /* first occurrence of ':' starting from left */
     let colon = 
         tail
             .find(":")
@@ -150,7 +164,6 @@ fn advance_phase_auth(
         tail = &tail[2..];
 
         let auth_delim = find_auth_delim(tail);
-
         let authority = Some(&tail[..auth_delim]);
         
         tail = &tail[auth_delim..];
@@ -239,7 +252,6 @@ fn advance_phase_query_frag(
     )
 }
 
-
 fn advance_phase_path(
     phase: URIPhase
 ) -> Result<URIPhase, URIParseError> {
@@ -305,7 +317,7 @@ fn phase_shift<'a>(
 fn structure_components(
     uri: &str
 ) -> Result<URIPhase, URIParseError> {
-    let phase = URIPhase::construct(uri);
+    let phase = URIPhase::new(uri);
 
     let phase_changes = vec!
         [ advance_phase_scheme,
@@ -326,20 +338,6 @@ fn str_opt_to_string(a: Option<&str>) -> Option<String> {
     }
 }
 
-#[derive(Debug)]
-pub struct URI {
-    scheme: String,
-    authority: Option<String>,
-    path: String,
-    query: Option<String>,
-    fragment: Option<String>
-}
-
-enum URIQueryOrFragment {
-    Query,
-    Fragment
-}
-
 impl URIQueryOrFragment {
     fn opposite(&self) -> URIQueryOrFragment {
         match self {
@@ -349,24 +347,8 @@ impl URIQueryOrFragment {
     }
 }
 
-enum URIQueryOrFragmentOrEither {
-    Query,
-    Fragment,
-    Either
-}
-
-#[derive(Debug)]
-struct URIPhase<'a> {
-    tail: &'a str,
-    scheme: Option<&'a str>,
-    authority: Option<&'a str>,
-    path: Option<&'a str>,
-    query: Option<&'a str>,
-    fragment: Option<&'a str>
-}
-
 impl<'a> URIPhase<'a> {
-    fn construct(uri: &str) -> URIPhase {
+    fn new(uri: &str) -> URIPhase {
         URIPhase {
             tail: uri,
             scheme: None,
@@ -390,7 +372,6 @@ impl<'a> From<URIPhase<'a>> for URI {
     }
 }
 
-
 impl TryFrom<&str> for URI {
     type Error = URIParseError;
     fn try_from(value: &str) -> Result<Self, Self::Error> {
@@ -402,5 +383,59 @@ impl TryFrom<&str> for URI {
 impl URI {
     pub fn try_parse(uri: &str) -> Option<URI> {
         URI::try_from(uri).ok()
+    }
+    pub fn from_components(
+        scheme: &str,
+        authority: Option<&str>,
+        path: &str,
+        query: Option<&str>,
+        fragment: Option<&str>
+    ) -> URI {
+        URI {
+            scheme: String::from(scheme),
+            authority: str_opt_to_string(authority),
+            path: String::from(path),
+            query: str_opt_to_string(query),
+            fragment: str_opt_to_string(fragment)
+        }
+    }
+}
+
+impl Display for URIParseError {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>
+    ) -> std::fmt::Result {
+        match self {
+            URIParseError::NoScheme => write!(f, "uri scheme not found."),
+            URIParseError::NoPath => write!(f, "uri path not found."),
+        }
+    }
+}
+
+impl Error for URIParseError { }
+
+#[cfg(test)]
+mod tests {
+    use super::URI;
+
+    #[test]
+    fn exec() {
+        let uris: Vec<(&str, Option<URI>)> = 
+            vec! [
+                ("ftp://ftp.is.co.za/rfc/rfc1808.txt", Some(URI::from_components("ftp", Some("ftp.is.co.za"), "/rfc/rfc1808.txt", None, None))),
+                ("http://www.ietf.org/rfc/rfc2396.txt", Some(URI::from_components("http", Some("www.ietf.org"), "/rfc/rfc2396.txt", None, None))),
+                ("ldap://[2001:db8::7]/c=GB?objectClass?one", Some(URI::from_components("ldap", Some("[2001:db8::7]"), "/c=GB", Some("objectClass?one"), None))),
+                ("mailto:John.Doe@example.com", Some(URI::from_components("mailto", None, "John.Doe@example.com", None, None))),
+                ("news:comp.infosystems.www.servers.unix", Some(URI::from_components("news", None, "comp.infosystems.www.servers.unix", None, None))),
+                ("tel:+1-816-555-1212", Some(URI::from_components("tel", None, "+1-816-555-1212", None, None))),
+                ("telnet://192.0.2.16:80/", Some(URI::from_components("telnet", Some("192.0.2.16:80"), "/", None, None))),
+                ("urn:oasis:names:specification:docbook:dtd:xml:4.1.2", Some(URI::from_components("urn", None, "oasis:names:specification:docbook:dtd:xml:4.1.", None, None)))
+            ];
+
+        for (uri_s, expected_value) in uris {
+            let uri = URI::try_parse(uri_s);
+            assert_eq!(uri, expected_value)
+        }
     }
 }
