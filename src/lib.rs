@@ -1,36 +1,4 @@
 /* 
-2.2.  Reserved Characters
-
-   URIs include components and subcomponents that are delimited by
-   characters in the "reserved" set.  These characters are called
-   "reserved" because they may (or may not) be defined as delimiters by
-   the generic syntax, by each scheme-specific syntax, or by the
-   implementation-specific syntax of a URI's dereferencing algorithm.
-   If data for a URI component would conflict with a reserved
-   character's purpose as a delimiter, then the conflicting data must be
-   percent-encoded before the URI is formed.
-
-Berners-Lee, et al.         Standards Track                    [Page 12]
-
-
-RFC 3986                   URI Generic Syntax               January 2005
-
-
-      reserved    = gen-delims / sub-delims
-
-      gen-delims  = ":" / "/" / "?" / "#" / "[" / "]" / "@"
-
-      sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
-                  / "*" / "+" / "," / ";" / "="
-
-2.3.  Unreserved Characters
-
-   Characters that are allowed in a URI but do not have a reserved
-   purpose are called unreserved.  These include uppercase and lowercase
-   letters, decimal digits, hyphen, period, underscore, and tilde.
-
-      unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
-
 3.  Syntax Components
 
    The generic URI syntax consists of a hierarchical sequence of
@@ -232,9 +200,9 @@ fn advance_phase_query_frag(
             tail = &tail[j..];
             let phase = URIPhase 
                 { fragment: Some(fragment),
-                    query: Some(query), 
-                    tail,
-                    ..phase };
+                  query: Some(query), 
+                  tail,
+                  ..phase };
 
             return Ok(phase);
         } else {
