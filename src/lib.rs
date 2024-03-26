@@ -24,6 +24,8 @@
 
 */
 
+use std::{error::Error, fmt::Display};
+
 
 /* 
 URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
@@ -45,28 +47,45 @@ The following are two example URIs and their component parts:
          urn:example:animal:ferret:nose
 
 */
-
-use std::collections::HashSet;
-
 #[derive(Debug)]
-enum AdvancePhaseError {
-    Scheme,
-    Path
+pub enum URIParseError {
+    NoScheme,
+    NoPath
 }
+
+impl Display for URIParseError {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>
+    ) -> std::fmt::Result {
+        match self {
+            URIParseError::NoScheme => write!(f, "uri scheme not found."),
+            URIParseError::NoPath => write!(f, "uri path not found."),
+        }
+    }
+}
+impl Error for URIParseError { }
 
 fn find_next_opt_component(
     q_or_f: URIQueryOrFragmentOrEither,
     s: &str
-) -> (URIQueryOrFragment, Option<usize>) {
+) -> Option<(URIQueryOrFragment, usize)> {
     match q_or_f {
-        URIQueryOrFragmentOrEither::Query => (URIQueryOrFragment::Query, s.find('?')),
-        URIQueryOrFragmentOrEither::Fragment => (URIQueryOrFragment::Fragment, s.find('#')),
+        URIQueryOrFragmentOrEither::Query => 
+            s
+                .find('?')
+                .map(|i| (URIQueryOrFragment::Query, i)),
+        URIQueryOrFragmentOrEither::Fragment =>
+            s
+                .find('#')
+                .map(|i| (URIQueryOrFragment::Fragment, i)),
         URIQueryOrFragmentOrEither::Either =>
             match s.find('?') {
-                Some(i) => (URIQueryOrFragment::Query, Some(i)),
+                Some(i) =>
+                    Some((URIQueryOrFragment::Query, i)),
                 None => match s.find('#') {
-                    Some(i) => (URIQueryOrFragment::Fragment, Some(i)),
-                    None => (URIQueryOrFragment::Fragment, None)
+                    Some(i) => Some((URIQueryOrFragment::Fragment, i)),
+                    None => None
                 }
             }
     }
@@ -94,62 +113,40 @@ fn find_auth_delim(
     uri.len()
 }
 
-fn find_query_or_frag(
-    tail: &str,
-) -> Option<(URIQueryOrFragment, usize)> {
-    let mut results: Vec<char> = Vec::with_capacity(3);
-    
-    for c in tail.chars() {
-        if (c == '?' || c == '#') && !results.contains(&c)  {
-            results.push(c);
-        }
-        
-    }
-
-    for c in results {
-        if let Some(i) = tail.find(c) {
-            let comp_type = 
-                match c {
-                    '?' => URIQueryOrFragment::Query,
-                    '#' => URIQueryOrFragment::Fragment,
-                    _ => unreachable!()
-                };
-            return Some((comp_type, i));
-        }
-    }
-
-    None
-}
-
-fn advance_phase_scheme<'a>(
+fn advance_phase_scheme(
     phase: URIPhase
-) -> Result<URIPhase, AdvancePhaseError> {
+) -> Result<URIPhase, URIParseError> {
     let tail = phase.tail;
 
     /* first occurence of ':' starting from left */
     let colon = 
         tail
             .find(":")
-            .ok_or(AdvancePhaseError::Scheme)?;
+            .ok_or(URIParseError::NoScheme)?;
+
+    if (&tail[..colon]).is_empty() {
+        return Err(URIParseError::NoScheme);
+    }
 
     let scheme = Some(&tail[..colon]);
-
     let tail = &tail[colon+1..];
 
-    Ok(URIPhase { scheme, tail, ..phase })
+    Ok(
+        URIPhase { scheme, tail, ..phase }
+    )
 }
 
 fn advance_phase_auth(
     phase: URIPhase
-) -> Result<URIPhase, AdvancePhaseError> {
+) -> Result<URIPhase, URIParseError> {
 /*
     The authority component is preceded by a double slash ("//") and is
     terminated by the next slash ("/"), question mark ("?"), or number
     sign ("#") character, or by the end of the URI.
 */
-    let mut tail = phase.tail;
+    if phase.tail.starts_with("//") {
+        let mut tail = phase.tail;
 
-    if tail.starts_with("//") {
         tail = &tail[2..];
 
         let auth_delim = find_auth_delim(tail);
@@ -158,15 +155,19 @@ fn advance_phase_auth(
         
         tail = &tail[auth_delim..];
 
-        return Ok(URIPhase { tail, authority, ..phase })
+        return Ok(
+            URIPhase { tail, authority, ..phase }
+        )
     }
     
-    Ok(URIPhase { ..phase }) 
+    Ok(
+        URIPhase { ..phase }
+    ) 
 }
 
 fn advance_phase_query_frag(
     phase: URIPhase
-) -> Result<URIPhase, AdvancePhaseError> {
+) -> Result<URIPhase, URIParseError> {
     
     if phase.tail.is_empty() {
         return Ok(URIPhase { ..phase });
@@ -174,8 +175,11 @@ fn advance_phase_query_frag(
 
     let mut tail = phase.tail;
 
-    while let (q_or_f, Some(i)) = find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail) {
-        
+    while let Some((q_or_f, i)) =
+        find_next_opt_component(
+            URIQueryOrFragmentOrEither::Either,
+            tail
+    ) {
         let opposite = q_or_f.opposite();
         let opposite_witheither =
             match opposite {
@@ -183,8 +187,7 @@ fn advance_phase_query_frag(
                 URIQueryOrFragment::Fragment => URIQueryOrFragmentOrEither::Fragment,
             };
 
-
-        if let (_, Some(j)) = find_next_opt_component(opposite_witheither,tail) {
+        if let Some((_, j)) = find_next_opt_component(opposite_witheither,tail) {
             let this_side = &tail[i+1..j];
             let that_side = &tail[j+1..];
             let (fragment, query) = 
@@ -198,34 +201,48 @@ fn advance_phase_query_frag(
                 };
             
             tail = &tail[j..];
-            let phase = URIPhase 
-                { fragment: Some(fragment),
-                  query: Some(query), 
-                  tail,
-                  ..phase };
 
-            return Ok(phase);
+            return Ok(
+                URIPhase { 
+                    fragment: Some(fragment),
+                    query: Some(query), 
+                    tail,
+                    ..phase 
+                }
+            );
         } else {
-
             let value = &tail[i+1..];
             tail = &tail[i+1+value.len()..];
             match q_or_f {
                 URIQueryOrFragment::Query =>
-                    return Ok(URIPhase { tail, query: Some(value), ..phase }),
+                    return Ok(
+                        URIPhase {
+                            tail,
+                            query: Some(value),
+                            ..phase
+                        }
+                    ),
                 URIQueryOrFragment::Fragment =>
-                    return Ok(URIPhase { tail, fragment: Some(value), ..phase }),
+                    return Ok(
+                        URIPhase {
+                            tail,
+                            fragment: Some(value),
+                            ..phase 
+                        }
+                    ),
             }
         }
-        
     }
 
-    Ok(URIPhase { tail, ..phase })
+    Ok(
+        URIPhase { tail, ..phase }
+    )
 }
 
 
-fn advance_phase_path<'a, 'b>(
+fn advance_phase_path(
     phase: URIPhase
-) -> Result<URIPhase, AdvancePhaseError> {
+) -> Result<URIPhase, URIParseError> {
     
     let mut tail = phase.tail;
     let split: Vec<&str> =
@@ -239,50 +256,56 @@ fn advance_phase_path<'a, 'b>(
         return Ok(URIPhase { path, ..phase });
     }
 
+    if split.len() == 0 {
+        return Err(
+            URIParseError::NoPath
+        );
+    }
+
     let tail_unit = *split.last().unwrap();
-    match find_query_or_frag(tail_unit) {
+    match find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail_unit) {
         Some((_component, index)) => {
-            
             let index = index + tail.len() - tail_unit.len();
 
             let head = &tail[..index];
             if head.is_empty() {
-                return Err(AdvancePhaseError::Path)
+                return Err(URIParseError::NoPath)
             }
             
             let path = Some(head);
             tail = &tail[index..];
 
-            Ok(URIPhase {tail, path, ..phase})
+            Ok(
+                URIPhase { tail, path, ..phase }
+            )
         },
         None => {
             let path = Some(tail);
             let tail = &phase.tail[phase.tail.len()..];
-            Ok(URIPhase {tail, path, ..phase})
-        },
+
+            Ok(
+                URIPhase { tail, path, ..phase }
+            )
+        }
     }
 
 }
 
 fn phase_shift<'a>(
-    phase_changes: &[fn(URIPhase) -> Result<URIPhase, AdvancePhaseError>],
-    current_phase: URIPhase<'a>,
-    index: usize,
-) -> Result<URIPhase<'a>, AdvancePhaseError> {
-    if index >= phase_changes.len() {
-        Ok(current_phase)
-    } else {
-        let next_phase = phase_changes[index](current_phase)?;
-        phase_shift(phase_changes, next_phase, index + 1)
+    phase_changes: &[fn(URIPhase) -> Result<URIPhase, URIParseError>],
+    initial_phase: URIPhase<'a>
+) -> Result<URIPhase<'a>, URIParseError> {
+    let mut current_phase = initial_phase;
+    for change in phase_changes {
+        current_phase = change(current_phase)?;
     }
+    Ok(current_phase)
 }
-
 
 fn structure_components(
     uri: &str
-) -> Result<URIPhase, AdvancePhaseError> {
-
-    let phase = URIPhase::new(uri);
+) -> Result<URIPhase, URIParseError> {
+    let phase = URIPhase::construct(uri);
 
     let phase_changes = vec!
         [ advance_phase_scheme,
@@ -292,11 +315,16 @@ fn structure_components(
 
     phase_shift(
         &phase_changes,
-        phase,
-        0
+        phase
     )
 }
 
+fn str_opt_to_string(a: Option<&str>) -> Option<String> {
+    match a {
+        Some(str) => Some(String::from(str)),
+        None => None
+    }
+}
 
 #[derive(Debug)]
 pub struct URI {
@@ -308,8 +336,8 @@ pub struct URI {
 }
 
 enum URIQueryOrFragment {
-    Query = 1,
-    Fragment = 2
+    Query,
+    Fragment
 }
 
 impl URIQueryOrFragment {
@@ -329,7 +357,6 @@ enum URIQueryOrFragmentOrEither {
 
 #[derive(Debug)]
 struct URIPhase<'a> {
-    input: &'a str,
     tail: &'a str,
     scheme: Option<&'a str>,
     authority: Option<&'a str>,
@@ -339,9 +366,8 @@ struct URIPhase<'a> {
 }
 
 impl<'a> URIPhase<'a> {
-    fn new(uri: &str) -> URIPhase {
+    fn construct(uri: &str) -> URIPhase {
         URIPhase {
-            input: uri,
             tail: uri,
             scheme: None,
             authority: None,
@@ -352,23 +378,29 @@ impl<'a> URIPhase<'a> {
     }
 }
 
-impl URI {
-
-    pub fn parse(uri: &str) -> Option<URI> {
-        let phase =
-            structure_components(uri).ok()?;
-
-        println!("{:#?}", phase);
-
-        None
+impl<'a> From<URIPhase<'a>> for URI {
+    fn from(components: URIPhase) -> Self {
+        URI {
+            scheme: String::from(components.scheme.unwrap()),
+            authority: str_opt_to_string(components.authority),
+            path: String::from(components.path.unwrap()),
+            query: str_opt_to_string(components.query),
+            fragment: str_opt_to_string(components.fragment)
+        }
     }
 }
 
-impl URIQueryOrFragment {
-    pub fn delimiter(&self) -> char {
-        match self {
-            URIQueryOrFragment::Query => '?',
-            URIQueryOrFragment::Fragment => '#',
-        }
+
+impl TryFrom<&str> for URI {
+    type Error = URIParseError;
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let phase = structure_components(value)?;
+        Ok(URI::from(phase))
+    }
+}
+
+impl URI {
+    pub fn try_parse(uri: &str) -> Option<URI> {
+        URI::try_from(uri).ok()
     }
 }
