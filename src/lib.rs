@@ -139,11 +139,14 @@ fn find_auth_terminator(
     uri.len()
 }
 
-    /* 
-        URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
-        scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
-    */
-fn parse_scheme<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> Result<URIPhase<'a>, ParseURIError> {
+/* 
+    URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+    scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+*/
+fn parse_scheme<'a>(
+    split: &Vec<&'a str>,
+    phase: URIPhase<'a>
+) -> Result<URIPhase<'a>, ParseURIError> {
     if split.len() != 2 {
         return Err(ParseURIError::ErroneousScheme)
     }
@@ -167,7 +170,10 @@ fn parse_scheme<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> Result<URIPhas
     If a URI contains an authority component, then the path component
     must either be empty or begin with a slash ("/") character.
 */
-fn parse_authority<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+fn parse_authority<'a>(
+    split: &Vec<&'a str>,
+    phase: URIPhase<'a>
+) -> URIPhase<'a> {
     if split.len() != 2 {
         return phase;
     }
@@ -184,11 +190,16 @@ fn parse_authority<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a
     by the first question mark ("?") or number sign ("#") character, or
     by the end of the URI.
 */
-
-fn parse_path<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+fn parse_path<'a>(
+    split: &Vec<&'a str>,
+    phase: URIPhase<'a>
+) -> Result<URIPhase<'a>, ParseURIError> {
     if split.len() != 2 {
+        if phase.tail.is_empty() {
+            return Err(ParseURIError::ErroneousPath)
+        }
         let path = Some(phase.tail);
-        return URIPhase { path, ..phase };
+        return Ok(URIPhase { path, ..phase });
     }
     
     let head = split[0];
@@ -200,7 +211,7 @@ fn parse_path<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
         };
     let path = Some(&tail[..path_terminator]);
 
-    URIPhase { path, ..phase }
+    Ok(URIPhase { path, ..phase })
 }
 
 /*
@@ -208,7 +219,10 @@ fn parse_path<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
     mark ("?") character and terminated by a number sign ("#") character
     or by the end of the URI.
 */
-fn parse_query<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+fn parse_query<'a>(
+    split: &Vec<&'a str>,
+    phase: URIPhase<'a>
+) -> URIPhase<'a> {
     if split.len() != 2 {
         return phase;
     }
@@ -232,16 +246,13 @@ fn parse_fragment<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a>
     if split.len() != 2 {
         return phase;
     }
-    let fragment =
-        if !split[1].is_empty() {
-            Some(split[1])
-        } else {
-            None
-        };
-
+    let fragment = Some(split[1]);
     URIPhase { fragment, ..phase }
 }
 
+/*
+    URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+*/
 fn advance_phase<'a>(
     phase: URIPhase<'a>,
     delimiter: &str
@@ -254,14 +265,13 @@ fn advance_phase<'a>(
         match delimiter {
             ":" => parse_scheme(&split, phase)?,
             "//" => parse_authority(&split, phase),
-            "/" => parse_path(&split, phase),
+            "/" => parse_path(&split, phase)?,
             "?" => parse_query(&split, phase),
             "#" => parse_fragment(&split, phase),
             _ => unreachable!()
         };
         
-    let tail = split.last().unwrap();
-
+    let tail = *split.last().unwrap();
     Ok(URIPhase { tail, ..phase })
 }
 
