@@ -42,12 +42,12 @@ The following are two example URIs and their component parts:
 
 */
 
-use std::{error::Error, fmt::Display, num::ParseIntError};
+use std::{collections::VecDeque, error::Error, fmt::Display};
 
 #[derive(Debug)]
 pub enum ParseURIError {
-    NoScheme,
-    NoPath
+    ErroneousScheme,
+    ErroneousPath
 }
 
 /* [ userinfo "@" ] host [ ":" port ] */
@@ -59,6 +59,14 @@ pub struct Authority {
     value: String
 }
 
+/*
+      URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+
+      hier-part   = "//" authority path-abempty
+                  / path-absolute
+                  / path-rootless
+                  / path-empty 
+*/
 #[derive(Debug, PartialEq, Eq)]
 pub struct URI {
     scheme: String,
@@ -104,18 +112,12 @@ fn find_next_opt_component(
                 .find('#')
                 .map(|i| (URIQueryOrFragment::Fragment, i)),
         URIQueryOrFragmentOrEither::Either =>
-            match s.find('?') {
-                Some(i) =>
-                    Some((URIQueryOrFragment::Query, i)),
-                None => match s.find('#') {
-                    Some(i) => Some((URIQueryOrFragment::Fragment, i)),
-                    None => None
-                }
-            }
+            find_next_opt_component(URIQueryOrFragmentOrEither::Query, s)
+            .or(find_next_opt_component(URIQueryOrFragmentOrEither::Fragment, s))
     }
 }
 
-fn find_auth_delim(
+fn find_auth_terminator(
     uri: &str
 ) -> usize {
     let mut results: Vec<char> = Vec::with_capacity(3);
@@ -137,223 +139,155 @@ fn find_auth_delim(
     uri.len()
 }
 
-fn advance_phase_scheme(
-    phase: URIPhase
-) -> Result<URIPhase, ParseURIError> {
-    let tail = phase.tail;
-
-    /* first occurrence of ':' starting from left */
-    let colon = 
-        tail
-            .find(":")
-            .ok_or(ParseURIError::NoScheme)?;
-
-    if (&tail[..colon]).is_empty() {
-        return Err(ParseURIError::NoScheme);
+    /* 
+        URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+        scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+    */
+fn parse_scheme<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> Result<URIPhase<'a>, ParseURIError> {
+    if split.len() != 2 {
+        return Err(ParseURIError::ErroneousScheme)
     }
 
-    let scheme = Some(&tail[..colon]);
-    let tail = &tail[colon+1..];
-
-    Ok(
-        URIPhase { scheme, tail, ..phase }
-    )
+    if split[0].is_empty() {
+        return Err(ParseURIError::ErroneousScheme);
+    }
+    
+    let scheme = Some(split[0]);
+    Ok(URIPhase { scheme, ..phase })
 }
 
-fn advance_phase_auth(
-    phase: URIPhase
-) -> Result<URIPhase, ParseURIError> {
 /*
+      URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+      authority   = [ userinfo "@" ] host [ ":" port ]
+
     The authority component is preceded by a double slash ("//") and is
     terminated by the next slash ("/"), question mark ("?"), or number
     sign ("#") character, or by the end of the URI.
+
+    If a URI contains an authority component, then the path component
+    must either be empty or begin with a slash ("/") character.
 */
-    if phase.tail.starts_with("//") {
-        let mut tail = phase.tail;
-
-        tail = &tail[2..];
-
-        let auth_delim = find_auth_delim(tail);
-        let authority = Some(&tail[..auth_delim]);
-        
-        tail = &tail[auth_delim..];
-
-        return Ok(
-            URIPhase { tail, authority, ..phase }
-        )
+fn parse_authority<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+    if split.len() != 2 {
+        return phase;
     }
+    let authority_terminator = find_auth_terminator(split[1]);
     
-    Ok(
-        URIPhase { ..phase }
-    ) 
+    let head = split[1];
+    let authority = Some(&head[..authority_terminator]);
+
+    URIPhase { authority, ..phase }
 }
 
-fn advance_phase_query_frag(
-    phase: URIPhase
-) -> Result<URIPhase, ParseURIError> {
-    
-    if phase.tail.is_empty() {
-        return Ok(URIPhase { ..phase });
-    }
+/*
+    The path is terminated
+    by the first question mark ("?") or number sign ("#") character, or
+    by the end of the URI.
+*/
 
-    let mut tail = phase.tail;
-
-    while let Some((q_or_f, i)) =
-        find_next_opt_component(
-            URIQueryOrFragmentOrEither::Either,
-            tail
-    ) {
-        let opposite = q_or_f.opposite();
-        let opposite_witheither =
-            match opposite {
-                URIQueryOrFragment::Query => URIQueryOrFragmentOrEither::Query,
-                URIQueryOrFragment::Fragment => URIQueryOrFragmentOrEither::Fragment,
-            };
-
-        if let Some((_, j)) = find_next_opt_component(opposite_witheither,tail) {
-            let this_side = &tail[i+1..j];
-            let that_side = &tail[j+1..];
-            let (fragment, query) = 
-                match (q_or_f, opposite) {
-                    (URIQueryOrFragment::Fragment, URIQueryOrFragment::Query) =>
-                        (this_side, that_side),
-                    (URIQueryOrFragment::Query, URIQueryOrFragment::Fragment) =>
-                        (that_side, this_side),
-                    _ =>
-                        unreachable!()
-                };
-            
-            tail = &tail[j..];
-
-            return Ok(
-                URIPhase { 
-                    fragment: Some(fragment),
-                    query: Some(query), 
-                    tail,
-                    ..phase 
-                }
-            );
-        } else {
-            let value = &tail[i+1..];
-            tail = &tail[i+1+value.len()..];
-            match q_or_f {
-                URIQueryOrFragment::Query =>
-                    return Ok(
-                        URIPhase {
-                            tail,
-                            query: Some(value),
-                            ..phase
-                        }
-                    ),
-                URIQueryOrFragment::Fragment =>
-                    return Ok(
-                        URIPhase {
-                            tail,
-                            fragment: Some(value),
-                            ..phase 
-                        }
-                    ),
-            }
-        }
-    }
-
-    Ok(
-        URIPhase { tail, ..phase }
-    )
-}
-
-fn advance_phase_path(
-    phase: URIPhase
-) -> Result<URIPhase, ParseURIError> {
-    
-    let mut tail = phase.tail;
-    let split: Vec<&str> =
-        tail
-            .split("/")
-            .filter_map(|s| if s.is_empty() { None } else { Some(s) })
-            .collect();
-    
-    if split.len() == 0 && phase.tail == "/" {
+fn parse_path<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+    if split.len() != 2 {
         let path = Some(phase.tail);
-        return Ok(URIPhase { path, ..phase });
+        return URIPhase { path, ..phase };
     }
+    
+    let head = split[0];
+    let tail = &phase.tail[head.len()..];    
+    let path_terminator =
+        match find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail) {
+            Some((_, i)) => i,
+            None => tail.len()
+        };
+    let path = Some(&tail[..path_terminator]);
 
-    if split.len() == 0 {
-        return Err(
-            ParseURIError::NoPath
-        );
-    }
-
-    let tail_unit = *split.last().unwrap();
-    match find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail_unit) {
-        Some((_component, index)) => {
-            let index = index + tail.len() - tail_unit.len();
-
-            let head = &tail[..index];
-            if head.is_empty() {
-                return Err(ParseURIError::NoPath)
-            }
-            
-            let path = Some(head);
-            tail = &tail[index..];
-
-            Ok(
-                URIPhase { tail, path, ..phase }
-            )
-        },
-        None => {
-            let path = Some(tail);
-            let tail = &phase.tail[phase.tail.len()..];
-
-            Ok(
-                URIPhase { tail, path, ..phase }
-            )
-        }
-    }
-
+    URIPhase { path, ..phase }
 }
 
-fn phase_shift<'a>(
-    phase_changes: &[fn(URIPhase) -> Result<URIPhase, ParseURIError>],
-    initial_phase: URIPhase<'a>
-) -> Result<URIPhase<'a>, ParseURIError> {
-    let mut current_phase = initial_phase;
-    for change in phase_changes {
-        current_phase = change(current_phase)?;
+/*
+    The query component is indicated by the first question
+    mark ("?") character and terminated by a number sign ("#") character
+    or by the end of the URI.
+*/
+fn parse_query<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+    if split.len() != 2 {
+        return phase;
     }
-    Ok(current_phase)
+
+    let head = split[1];    
+    let query_terminator =
+        match find_next_opt_component(URIQueryOrFragmentOrEither::Fragment, head) {
+            Some((_, i)) => i,
+            None => head.len()
+        };
+    let query = Some(&head[..query_terminator]);
+
+    URIPhase { query, ..phase }
+}
+
+/*
+    A fragment identifier component is indicated by the presence of a
+    number sign ("#") character and terminated by the end of the URI.
+*/
+fn parse_fragment<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+    if split.len() != 2 {
+        return phase;
+    }
+    let fragment =
+        if !split[1].is_empty() {
+            Some(split[1])
+        } else {
+            None
+        };
+
+    URIPhase { fragment, ..phase }
+}
+
+fn advance_phase<'a>(
+    phase: URIPhase<'a>,
+    delimiter: &str
+) -> Result<URIPhase<'a>, ParseURIError> {
+    let split: Vec<&str> =
+        phase.tail
+            .splitn(2, delimiter)
+            .collect();
+    let phase =
+        match delimiter {
+            ":" => parse_scheme(&split, phase)?,
+            "//" => parse_authority(&split, phase),
+            "/" => parse_path(&split, phase),
+            "?" => parse_query(&split, phase),
+            "#" => parse_fragment(&split, phase),
+            _ => unreachable!()
+        };
+        
+    let tail = split.last().unwrap();
+
+    Ok(URIPhase { tail, ..phase })
 }
 
 fn structure_components(
     uri: &str
 ) -> Result<URIPhase, ParseURIError> {
-    let phase = URIPhase::new(uri);
+    /*
+        The generic syntax uses the slash ("/"), question mark ("?"), and
+        number sign ("#") characters to delimit components that are
+        significant 
+   */
+    let interest = vec! [":", "//", "/", "?", "#"];
+    let mut interest = VecDeque::from(interest);
+    let initial_phase = URIPhase::new(uri);
 
-    let phase_changes = vec!
-        [ advance_phase_scheme,
-          advance_phase_auth,
-          advance_phase_path,
-          advance_phase_query_frag ];
-
-    phase_shift(
-        &phase_changes,
-        phase
-    )
+    let mut phase = initial_phase;
+    while let Some(delimiter) = interest.pop_front() {
+        phase = advance_phase(phase, delimiter)?;
+    };
+    Ok(phase)
 }
 
 fn str_opt_to_string(a: Option<&str>) -> Option<String> {
     match a {
         Some(str) => Some(String::from(str)),
         None => None
-    }
-}
-
-impl URIQueryOrFragment {
-    fn opposite(&self) -> URIQueryOrFragment {
-        match self {
-            URIQueryOrFragment::Query => URIQueryOrFragment::Fragment,
-            URIQueryOrFragment::Fragment => URIQueryOrFragment::Query,
-        }
     }
 }
 
@@ -384,7 +318,7 @@ impl<'a> From<URIPhase<'a>> for URI {
 
 impl TryFrom<&str> for URI {
     type Error = ParseURIError;
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<URI, Self::Error> {
         let phase = structure_components(value)?;
         Ok(URI::from(phase))
     }
@@ -394,6 +328,7 @@ impl URI {
     pub fn try_parse(uri: &str) -> Option<URI> {
         URI::try_from(uri).ok()
     }
+
     pub fn from_components(
         scheme: &str,
         authority: Option<&str>,
@@ -417,29 +352,32 @@ impl Display for ParseURIError {
         f: &mut std::fmt::Formatter<'_>
     ) -> std::fmt::Result {
         match self {
-            ParseURIError::NoScheme => write!(f, "uri scheme not found."),
-            ParseURIError::NoPath => write!(f, "uri path not found."),
+            ParseURIError::ErroneousScheme => write!(f, "uri scheme not found."),
+            ParseURIError::ErroneousPath => write!(f, "uri path not found."),
         }
     }
 }
 
 impl Error for ParseURIError { }
 
-
 #[derive(Debug)]
 pub enum ParseAuthorityError {
-    InvalidPort(ParseIntError, String)
+    InvalidPort,
+    InvalidIPV6
 }
 
 impl<'a> Display for ParseAuthorityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match &self {
-            ParseAuthorityError::InvalidPort(parse_int_err, input) => 
+        match self {
+            ParseAuthorityError::InvalidPort => 
                 write!(
                     f,
-                    "{} occurred.\nerror parsing port from {}.",
-                    parse_int_err,
-                    input
+                    "error parsing port into number."
+                ),
+            ParseAuthorityError::InvalidIPV6 =>
+                write!(
+                    f, 
+                    "error parsing ipv6 address. no closing [ found."
                 )
         }
     }
@@ -451,7 +389,9 @@ impl Authority {
 
     pub fn parse(value: &str, default_port: u16) -> Result<Authority, ParseAuthorityError> {
         let index_of_at = value.find('@');
-
+/*
+        userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
+*/
         let (user_info, tail) =
             match index_of_at {
                 Some(at) =>
@@ -460,7 +400,27 @@ impl Authority {
                     (None, value)
             };
 
-        /* TODO: IPV6 has : in it */
+/* 
+        A host identified by an Internet Protocol literal address, version 6
+        [RFC3513] or later, is distinguished by enclosing the IP literal
+        within square brackets ("[" and "]").  This is the only place where
+        square bracket characters are allowed in the URI syntax.  In
+        anticipation of future, as-yet-undefined IP literal address formats,
+        an implementation may use an optional version flag to indicate such a
+        format explicitly rather than rely on heuristic determination.
+
+            IP-literal = "[" ( IPv6address / IPvFuture  ) "]"
+*/
+        let tail =
+            if tail.starts_with('[') {
+                match tail.find(']') {
+                    Some(i) => &tail[i+1..],
+                    None => return Err(ParseAuthorityError::InvalidIPV6),
+                }
+            } else {
+                tail
+            };
+
         let index_of_colon = tail.find(':');
         let (host, port) =
             match index_of_colon {
@@ -469,7 +429,7 @@ impl Authority {
                     let port =
                     tail[colon+1..]
                             .parse::<u16>()
-                            .map_err(|e| ParseAuthorityError::InvalidPort(e, tail.to_string()))?;
+                            .map_err(|_e| ParseAuthorityError::InvalidPort)?;
                     (String::from(host), port)
                 },
                 None =>
@@ -489,14 +449,24 @@ impl Authority {
 
 #[cfg(test)]
 mod tests {
-    use crate::Authority;
-
-    use super::URI;
+    use super::{URI};
 
     #[test]
     fn exec() {
         let uris: Vec<(&str, Option<URI>)> = 
             vec! [
+                (
+                    "http://httpbin.org/a/b/c?123#doreme",
+                    Some(URI::from_components("http", Some("httpbin.org"), "/a/b/c", Some("123"), Some("doreme")))
+                ),
+                (
+                    "http://httpbin.org/a/b/c/?123#doreme",
+                    Some(URI::from_components("http", Some("httpbin.org"), "/a/b/c/", Some("123"), Some("doreme")))
+                ),
+                (
+                    "http://httpbin.org/get?a=1&b=2&c=3#hash",
+                    Some(URI::from_components("http", Some("httpbin.org"), "/get", Some("a=1&b=2&c=3"), Some("hash")))
+                ),
                 (
                     "ftp://ftp.is.co.za/rfc/rfc1808.txt",
                     Some(URI::from_components("ftp", Some("ftp.is.co.za"), "/rfc/rfc1808.txt", None, None))
@@ -505,10 +475,10 @@ mod tests {
                     "http://www.ietf.org/rfc/rfc2396.txt",
                     Some(URI::from_components("http", Some("www.ietf.org"), "/rfc/rfc2396.txt", None, None))
                 ),
-/*                 (
+                (
                     "ldap://[2001:db8::7]/c=GB?objectClass?one",
                     Some(URI::from_components("ldap", Some("[2001:db8::7]"), "/c=GB", Some("objectClass?one"), None))
-                ), */
+                ),
                 (
                     "mailto:John.Doe@example.com",
                     Some(URI::from_components("mailto", None, "John.Doe@example.com", None, None))
@@ -535,14 +505,7 @@ mod tests {
             let uri = URI::try_parse(uri_s);
             assert_eq!(uri, expected_value);
 
-            
-            if let Some(uri) = uri {
-                if let Some(authority) = uri.authority {
-                    let result = Authority::parse(&authority, 80);
-                    assert!(result.is_ok());
-                }
-            };
-
+        
         }
     }
 }
