@@ -59,6 +59,11 @@ pub struct Authority {
     value: String
 }
 
+#[derive(Debug)]
+pub enum ParseAuthorityError {
+    InvalidPort,
+    InvalidIPV6
+}
 /*
       URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
 
@@ -358,19 +363,13 @@ impl Display for ParseURIError {
         f: &mut std::fmt::Formatter<'_>
     ) -> std::fmt::Result {
         match self {
-            ParseURIError::ErroneousScheme => write!(f, "uri scheme not found."),
-            ParseURIError::ErroneousPath => write!(f, "uri path not found."),
+            ParseURIError::ErroneousScheme => write!(f, "scheme not found."),
+            ParseURIError::ErroneousPath => write!(f, "path not found."),
         }
     }
 }
 
 impl Error for ParseURIError { }
-
-#[derive(Debug)]
-pub enum ParseAuthorityError {
-    InvalidPort,
-    InvalidIPV6
-}
 
 impl<'a> Display for ParseAuthorityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -383,7 +382,7 @@ impl<'a> Display for ParseAuthorityError {
             ParseAuthorityError::InvalidIPV6 =>
                 write!(
                     f, 
-                    "error parsing ipv6 address. no closing [ found."
+                    "error parsing ipv6 address. no closing ] found."
                 )
         }
     }
@@ -391,9 +390,10 @@ impl<'a> Display for ParseAuthorityError {
 
 impl<'a> Error for ParseAuthorityError { }
 
-impl Authority {
+impl TryFrom<(&str, u16)> for Authority {
+    type Error = ParseAuthorityError;
 
-    pub fn parse(value: &str, default_port: u16) -> Result<Authority, ParseAuthorityError> {
+    fn try_from((value, default_port): (&str, u16)) -> Result<Self, Self::Error> {
         let index_of_at = value.find('@');
 /*
         userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
