@@ -89,7 +89,7 @@ enum URIQueryOrFragmentOrEither {
 }
 
 #[derive(Debug)]
-struct URIPhase<'a> {
+struct URIComponents<'a> {
     tail: &'a str,
     scheme: Option<&'a str>,
     authority: Option<&'a str>,
@@ -145,8 +145,8 @@ fn find_auth_terminator(
 */
 fn parse_scheme<'a>(
     split: &Vec<&'a str>,
-    phase: URIPhase<'a>
-) -> Result<URIPhase<'a>, ParseURIError> {
+    components: URIComponents<'a>
+) -> Result<URIComponents<'a>, ParseURIError> {
     if split.len() != 2 {
         return Err(ParseURIError::ErroneousScheme)
     }
@@ -156,7 +156,7 @@ fn parse_scheme<'a>(
     }
     
     let scheme = Some(split[0]);
-    Ok(URIPhase { scheme, ..phase })
+    Ok(URIComponents { scheme, ..components })
 }
 
 /*
@@ -172,17 +172,17 @@ fn parse_scheme<'a>(
 */
 fn parse_authority<'a>(
     split: &Vec<&'a str>,
-    phase: URIPhase<'a>
-) -> URIPhase<'a> {
+    components: URIComponents<'a>
+) -> URIComponents<'a> {
     if split.len() != 2 {
-        return phase;
+        return components;
     }
     let authority_terminator = find_auth_terminator(split[1]);
     
     let head = split[1];
     let authority = Some(&head[..authority_terminator]);
 
-    URIPhase { authority, ..phase }
+    URIComponents { authority, ..components }
 }
 
 /*
@@ -192,18 +192,18 @@ fn parse_authority<'a>(
 */
 fn parse_path<'a>(
     split: &Vec<&'a str>,
-    phase: URIPhase<'a>
-) -> Result<URIPhase<'a>, ParseURIError> {
+    components: URIComponents<'a>
+) -> Result<URIComponents<'a>, ParseURIError> {
     if split.len() != 2 {
-        if phase.tail.is_empty() {
+        if components.tail.is_empty() {
             return Err(ParseURIError::ErroneousPath)
         }
-        let path = Some(phase.tail);
-        return Ok(URIPhase { path, ..phase });
+        let path = Some(components.tail);
+        return Ok(URIComponents { path, ..components });
     }
     
     let head = split[0];
-    let tail = &phase.tail[head.len()..];    
+    let tail = &components.tail[head.len()..];    
     let path_terminator =
         match find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail) {
             Some((_, i)) => i,
@@ -211,7 +211,7 @@ fn parse_path<'a>(
         };
     let path = Some(&tail[..path_terminator]);
 
-    Ok(URIPhase { path, ..phase })
+    Ok(URIComponents { path, ..components })
 }
 
 /*
@@ -221,10 +221,10 @@ fn parse_path<'a>(
 */
 fn parse_query<'a>(
     split: &Vec<&'a str>,
-    phase: URIPhase<'a>
-) -> URIPhase<'a> {
+    components: URIComponents<'a>
+) -> URIComponents<'a> {
     if split.len() != 2 {
-        return phase;
+        return components;
     }
 
     let head = split[1];    
@@ -235,49 +235,52 @@ fn parse_query<'a>(
         };
     let query = Some(&head[..query_terminator]);
 
-    URIPhase { query, ..phase }
+    URIComponents { query, ..components }
 }
 
 /*
     A fragment identifier component is indicated by the presence of a
     number sign ("#") character and terminated by the end of the URI.
 */
-fn parse_fragment<'a>(split: &Vec<&'a str>, phase: URIPhase<'a>) -> URIPhase<'a> {
+fn parse_fragment<'a>(
+    split: &Vec<&'a str>,
+    components: URIComponents<'a>
+) -> URIComponents<'a> {
     if split.len() != 2 {
-        return phase;
+        return components;
     }
     let fragment = Some(split[1]);
-    URIPhase { fragment, ..phase }
+    URIComponents { fragment, ..components }
 }
 
 /*
     URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
 */
 fn advance_phase<'a>(
-    phase: URIPhase<'a>,
+    components: URIComponents<'a>,
     delimiter: &str
-) -> Result<URIPhase<'a>, ParseURIError> {
+) -> Result<URIComponents<'a>, ParseURIError> {
     let split: Vec<&str> =
-        phase.tail
+        components.tail
             .splitn(2, delimiter)
             .collect();
     let phase =
         match delimiter {
-            ":" => parse_scheme(&split, phase)?,
-            "//" => parse_authority(&split, phase),
-            "/" => parse_path(&split, phase)?,
-            "?" => parse_query(&split, phase),
-            "#" => parse_fragment(&split, phase),
+            ":" => parse_scheme(&split, components)?,
+            "//" => parse_authority(&split, components),
+            "/" => parse_path(&split, components)?,
+            "?" => parse_query(&split, components),
+            "#" => parse_fragment(&split, components),
             _ => unreachable!()
         };
         
     let tail = *split.last().unwrap();
-    Ok(URIPhase { tail, ..phase })
+    Ok(URIComponents { tail, ..phase })
 }
 
 fn structure_components(
-    uri: &str
-) -> Result<URIPhase, ParseURIError> {
+    supposed_uri: &str
+) -> Result<URIComponents, ParseURIError> {
     /*
         The generic syntax uses the slash ("/"), question mark ("?"), and
         number sign ("#") characters to delimit components that are
@@ -285,7 +288,7 @@ fn structure_components(
    */
     let interest = vec! [":", "//", "/", "?", "#"];
     let mut interest = VecDeque::from(interest);
-    let initial_phase = URIPhase::new(uri);
+    let initial_phase = URIComponents::new(supposed_uri);
 
     let mut phase = initial_phase;
     while let Some(delimiter) = interest.pop_front() {
@@ -294,16 +297,9 @@ fn structure_components(
     Ok(phase)
 }
 
-fn str_opt_to_string(a: Option<&str>) -> Option<String> {
-    match a {
-        Some(str) => Some(String::from(str)),
-        None => None
-    }
-}
-
-impl<'a> URIPhase<'a> {
-    fn new(uri: &str) -> URIPhase {
-        URIPhase {
+impl<'a> URIComponents<'a> {
+    fn new(uri: &str) -> URIComponents {
+        URIComponents {
             tail: uri,
             scheme: None,
             authority: None,
@@ -314,14 +310,14 @@ impl<'a> URIPhase<'a> {
     }
 }
 
-impl<'a> From<URIPhase<'a>> for URI {
-    fn from(components: URIPhase) -> Self {
+impl<'a> From<URIComponents<'a>> for URI {
+    fn from(components: URIComponents) -> Self {
         URI {
             scheme: String::from(components.scheme.unwrap()),
-            authority: str_opt_to_string(components.authority),
+            authority: components.authority.map(str::to_string),
             path: String::from(components.path.unwrap()),
-            query: str_opt_to_string(components.query),
-            fragment: str_opt_to_string(components.fragment)
+            query: components.query.map(str::to_string),
+            fragment: components.fragment.map(str::to_string)
         }
     }
 }
@@ -348,10 +344,10 @@ impl URI {
     ) -> URI {
         URI {
             scheme: String::from(scheme),
-            authority: str_opt_to_string(authority),
+            authority: authority.map(str::to_string),
             path: String::from(path),
-            query: str_opt_to_string(query),
-            fragment: str_opt_to_string(fragment)
+            query: query.map(str::to_string),
+            fragment: fragment.map(str::to_string)
         }
     }
 }
@@ -459,7 +455,7 @@ impl Authority {
 
 #[cfg(test)]
 mod tests {
-    use super::{URI};
+    use super::URI;
 
     #[test]
     fn exec() {
@@ -514,8 +510,6 @@ mod tests {
         for (uri_s, expected_value) in uris {
             let uri = URI::try_parse(uri_s);
             assert_eq!(uri, expected_value);
-
-        
         }
     }
 }
