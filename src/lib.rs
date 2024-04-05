@@ -53,10 +53,9 @@ pub enum ParseURIError {
 /* [ userinfo "@" ] host [ ":" port ] */
 #[derive(Debug, PartialEq, Eq)]
 pub struct Authority {
-    host: String,
-    port: u16,
-    user_info: Option<String>,
-    value: String
+    pub host: String,
+    pub port: u16,
+    pub user_info: Option<String>
 }
 
 #[derive(Debug)]
@@ -74,12 +73,12 @@ pub enum ParseAuthorityError {
 */
 #[derive(Debug, PartialEq, Eq)]
 pub struct URI {
-    scheme: String,
-    authority: Option<String>,
-    /* authority: Option<Authority>, */
-    path: String,
-    query: Option<String>,
-    fragment: Option<String>
+    pub scheme: String,
+    /* pub authority: Option<String>, */
+    pub authority: Option<Authority>,
+    pub path: String,
+    pub query: Option<String>,
+    pub fragment: Option<String>
 }
 
 enum URIQueryOrFragment {
@@ -319,7 +318,22 @@ impl<'a> From<URIComponents<'a>> for URI {
     fn from(components: URIComponents) -> Self {
         URI {
             scheme: String::from(components.scheme.unwrap()),
-            authority: components.authority.map(str::to_string),
+            authority: match components.authority {
+                Some(authority) => {
+                    let default_port =
+                        match components.scheme {
+                            Some("http") => 80,
+                            Some("https") => 443,
+                            Some("ftp") => 21,
+                            Some("ldap") => 389,
+                            Some("mailto") => 0,
+                            _ => 0,
+                        } as u16;
+                    Authority::try_from((authority, default_port)).ok()
+                },
+                None =>
+                    None,
+            },
             path: String::from(components.path.unwrap()),
             query: components.query.map(str::to_string),
             fragment: components.fragment.map(str::to_string)
@@ -330,7 +344,8 @@ impl<'a> From<URIComponents<'a>> for URI {
 impl TryFrom<&str> for URI {
     type Error = ParseURIError;
     fn try_from(value: &str) -> Result<URI, Self::Error> {
-        let phase = structure_components(value)?;
+        let phase =
+            structure_components(value)?;
         Ok(URI::from(phase))
     }
 }
@@ -342,14 +357,14 @@ impl URI {
 
     pub fn from_components(
         scheme: &str,
-        authority: Option<&str>,
+        authority: Option<Authority>,
         path: &str,
         query: Option<&str>,
         fragment: Option<&str>
     ) -> URI {
         URI {
             scheme: String::from(scheme),
-            authority: authority.map(str::to_string),
+            authority,
             path: String::from(path),
             query: query.map(str::to_string),
             fragment: fragment.map(str::to_string)
@@ -388,7 +403,28 @@ impl<'a> Display for ParseAuthorityError {
     }
 }
 
-impl<'a> Error for ParseAuthorityError { }
+impl Error for ParseAuthorityError { }
+
+impl Authority {
+    pub fn from_components(
+        host: &str,
+        port: u16,
+        user_info: Option<&str>
+    ) -> Authority {
+        let user_info =
+            match user_info {
+                Some(user_info) =>
+                    Some(String::from(user_info)),
+                None =>
+                    None
+            };
+        Authority {
+            host: String::from(host),
+            port,
+            user_info
+        }
+    }
+}
 
 impl TryFrom<(&str, u16)> for Authority {
     type Error = ParseAuthorityError;
@@ -439,15 +475,14 @@ impl TryFrom<(&str, u16)> for Authority {
                     (String::from(host), port)
                 },
                 None =>
-                    (String::from(tail), default_port),
+                    (String::from(value), default_port),
             };
 
         Ok(
             Authority {
                 host,
                 port,
-                user_info,
-                value: String::from(value)
+                user_info
             }
         )
     }
@@ -455,6 +490,8 @@ impl TryFrom<(&str, u16)> for Authority {
 
 #[cfg(test)]
 mod tests {
+    use crate::Authority;
+
     use super::URI;
 
     #[test]
@@ -462,28 +499,36 @@ mod tests {
         let uris: Vec<(&str, Option<URI>)> = 
             vec! [
                 (
+                    "ldap://[2001:db8::7]/c=GB?objectClass?one",
+                    Some(URI::from_components("ldap", Some(Authority::from_components("[2001:db8::7]", 389, None)), "/c=GB", Some("objectClass?one"), None))
+                ),
+                (
                     "http://httpbin.org/a/b/c?123#doreme",
-                    Some(URI::from_components("http", Some("httpbin.org"), "/a/b/c", Some("123"), Some("doreme")))
+                    Some(
+                        URI::from_components(
+                            "http",
+                            Some(Authority::from_components("httpbin.org", 80, None)),
+                            "/a/b/c",
+                            Some("123"),
+                            Some("doreme")
+                        )
+                    )
                 ),
                 (
                     "http://httpbin.org/a/b/c/?123#doreme",
-                    Some(URI::from_components("http", Some("httpbin.org"), "/a/b/c/", Some("123"), Some("doreme")))
+                    Some(URI::from_components("http", Some(Authority::from_components("httpbin.org", 80, None)), "/a/b/c/", Some("123"), Some("doreme")))
                 ),
                 (
                     "http://httpbin.org/get?a=1&b=2&c=3#hash",
-                    Some(URI::from_components("http", Some("httpbin.org"), "/get", Some("a=1&b=2&c=3"), Some("hash")))
+                    Some(URI::from_components("http", Some(Authority::from_components("httpbin.org", 80, None)), "/get", Some("a=1&b=2&c=3"), Some("hash")))
                 ),
                 (
                     "ftp://ftp.is.co.za/rfc/rfc1808.txt",
-                    Some(URI::from_components("ftp", Some("ftp.is.co.za"), "/rfc/rfc1808.txt", None, None))
+                    Some(URI::from_components("ftp", Some(Authority::from_components("ftp.is.co.za", 21, None)), "/rfc/rfc1808.txt", None, None))
                 ),
                 (
                     "http://www.ietf.org/rfc/rfc2396.txt",
-                    Some(URI::from_components("http", Some("www.ietf.org"), "/rfc/rfc2396.txt", None, None))
-                ),
-                (
-                    "ldap://[2001:db8::7]/c=GB?objectClass?one",
-                    Some(URI::from_components("ldap", Some("[2001:db8::7]"), "/c=GB", Some("objectClass?one"), None))
+                    Some(URI::from_components("http", Some(Authority::from_components("www.ietf.org", 80, None)), "/rfc/rfc2396.txt", None, None))
                 ),
                 (
                     "mailto:John.Doe@example.com",
@@ -499,7 +544,7 @@ mod tests {
                 ),
                 (
                     "telnet://192.0.2.16:80/",
-                    Some(URI::from_components("telnet", Some("192.0.2.16:80"), "/", None, None))
+                    Some(URI::from_components("telnet", Some(Authority::from_components("192.0.2.16", 80, None)), "/", None, None))
                 ),
                 (
                     "urn:oasis:names:specification:docbook:dtd:xml:4.1.2",
