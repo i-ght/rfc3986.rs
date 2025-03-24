@@ -1,4 +1,4 @@
-/* 
+/*
 3.  Syntax Components
 
    The generic URI syntax consists of a hierarchical sequence of
@@ -10,7 +10,7 @@
       hier-part   = "//" authority path-abempty
                   / path-absolute
                   / path-rootless
-                  / path-empty 
+                  / path-empty
     The following are two example URIs
      and their component parts:
 
@@ -28,7 +28,7 @@ The scheme and path components are required, though the path may be
 empty (no characters).  When authority is present, the path must
 either be empty or begin with a slash ("/") character.  When
 authority is not present, the path cannot begin with two slash
-characters ("//"). 
+characters ("//").
 
 The following are two example URIs and their component parts:
 
@@ -47,21 +47,21 @@ use std::{collections::VecDeque, error::Error, fmt::Display};
 #[derive(Debug)]
 pub enum ParseURIError {
     ErroneousScheme,
-    ErroneousPath
+    ErroneousPath,
 }
 
 /* [ userinfo "@" ] host [ ":" port ] */
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Authority {
     pub host: String,
     pub port: u16,
-    pub user_info: Option<String>
+    pub user_info: Option<String>,
 }
 
 #[derive(Debug)]
 pub enum ParseAuthorityError {
     InvalidPort,
-    InvalidIPV6
+    InvalidIPV6,
 }
 /*
       URI         = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
@@ -69,7 +69,7 @@ pub enum ParseAuthorityError {
       hier-part   = "//" authority path-abempty
                   / path-absolute
                   / path-rootless
-                  / path-empty 
+                  / path-empty
 */
 #[derive(Debug, PartialEq, Eq)]
 pub struct URI {
@@ -78,18 +78,18 @@ pub struct URI {
     pub authority: Option<Authority>,
     pub path: String,
     pub query: Option<String>,
-    pub fragment: Option<String>
+    pub fragment: Option<String>,
 }
 
 enum URIQueryOrFragment {
     Query,
-    Fragment
+    Fragment,
 }
 
 enum URIQueryOrFragmentOrEither {
     Query,
     Fragment,
-    Either
+    Either,
 }
 
 #[derive(Debug)]
@@ -99,33 +99,29 @@ struct URIComponents<'a> {
     authority: Option<&'a str>,
     path: Option<&'a str>,
     query: Option<&'a str>,
-    fragment: Option<&'a str>
+    fragment: Option<&'a str>,
 }
 
 fn find_next_opt_component(
     q_or_f: URIQueryOrFragmentOrEither,
-    s: &str
+    s: &str,
 ) -> Option<(URIQueryOrFragment, usize)> {
     match q_or_f {
-        URIQueryOrFragmentOrEither::Query => 
-            s
-                .find('?')
-                .map(|i| (URIQueryOrFragment::Query, i)),
-        URIQueryOrFragmentOrEither::Fragment =>
-            s
-                .find('#')
-                .map(|i| (URIQueryOrFragment::Fragment, i)),
-        URIQueryOrFragmentOrEither::Either =>
-            find_next_opt_component(URIQueryOrFragmentOrEither::Query, s)
-            .or(find_next_opt_component(URIQueryOrFragmentOrEither::Fragment, s))
+        URIQueryOrFragmentOrEither::Query => s.find('?').map(|i| (URIQueryOrFragment::Query, i)),
+        URIQueryOrFragmentOrEither::Fragment => {
+            s.find('#').map(|i| (URIQueryOrFragment::Fragment, i))
+        }
+        URIQueryOrFragmentOrEither::Either => {
+            find_next_opt_component(URIQueryOrFragmentOrEither::Query, s).or(
+                find_next_opt_component(URIQueryOrFragmentOrEither::Fragment, s),
+            )
+        }
     }
 }
 
-fn find_auth_terminator(
-    uri: &str
-) -> usize {
+fn find_auth_terminator(uri: &str) -> usize {
     let mut results: Vec<char> = Vec::with_capacity(3);
-    
+
     for c in uri.chars() {
         if c == '/' || c == '?' || c == '#' {
             if !results.contains(&c) {
@@ -139,28 +135,31 @@ fn find_auth_terminator(
             return i;
         }
     }
-    
+
     uri.len()
 }
 
-/* 
+/*
     URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
     scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
 */
 fn parse_scheme<'a>(
     split: &Vec<&'a str>,
-    components: URIComponents<'a>
+    components: URIComponents<'a>,
 ) -> Result<URIComponents<'a>, ParseURIError> {
     if split.len() != 2 {
-        return Err(ParseURIError::ErroneousScheme)
+        return Err(ParseURIError::ErroneousScheme);
     }
 
     if split[0].is_empty() {
         return Err(ParseURIError::ErroneousScheme);
     }
-    
+
     let scheme = Some(split[0]);
-    Ok(URIComponents { scheme, ..components })
+    Ok(URIComponents {
+        scheme,
+        ..components
+    })
 }
 
 /*
@@ -174,19 +173,19 @@ fn parse_scheme<'a>(
     If a URI contains an authority component, then the path component
     must either be empty or begin with a slash ("/") character.
 */
-fn parse_authority<'a>(
-    split: &Vec<&'a str>,
-    components: URIComponents<'a>
-) -> URIComponents<'a> {
+fn parse_authority<'a>(split: &Vec<&'a str>, components: URIComponents<'a>) -> URIComponents<'a> {
     if split.len() != 2 {
         return components;
     }
     let authority_terminator = find_auth_terminator(split[1]);
-    
+
     let head = split[1];
     let authority = Some(&head[..authority_terminator]);
 
-    URIComponents { authority, ..components }
+    URIComponents {
+        authority,
+        ..components
+    }
 }
 
 /*
@@ -196,23 +195,22 @@ fn parse_authority<'a>(
 */
 fn parse_path<'a>(
     split: &Vec<&'a str>,
-    components: URIComponents<'a>
+    components: URIComponents<'a>,
 ) -> Result<URIComponents<'a>, ParseURIError> {
     if split.len() != 2 {
         if components.tail.is_empty() {
-            return Err(ParseURIError::ErroneousPath)
+            return Err(ParseURIError::ErroneousPath);
         }
         let path = Some(components.tail);
         return Ok(URIComponents { path, ..components });
     }
-    
+
     let head = split[0];
-    let tail = &components.tail[head.len()..];    
-    let path_terminator =
-        match find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail) {
-            Some((_, i)) => i,
-            None => tail.len()
-        };
+    let tail = &components.tail[head.len()..];
+    let path_terminator = match find_next_opt_component(URIQueryOrFragmentOrEither::Either, tail) {
+        Some((_, i)) => i,
+        None => tail.len(),
+    };
     let path = Some(&tail[..path_terminator]);
 
     Ok(URIComponents { path, ..components })
@@ -223,38 +221,38 @@ fn parse_path<'a>(
     mark ("?") character and terminated by a number sign ("#") character
     or by the end of the URI.
 */
-fn parse_query<'a>(
-    split: &Vec<&'a str>,
-    components: URIComponents<'a>
-) -> URIComponents<'a> {
+fn parse_query<'a>(split: &Vec<&'a str>, components: URIComponents<'a>) -> URIComponents<'a> {
     if split.len() != 2 {
         return components;
     }
 
-    let head = split[1];    
-    let query_terminator =
+    let head = split[1];
+    let query_terminator = 
         match find_next_opt_component(URIQueryOrFragmentOrEither::Fragment, head) {
             Some((_, i)) => i,
-            None => head.len()
+            None => head.len(),
         };
     let query = Some(&head[..query_terminator]);
 
-    URIComponents { query, ..components }
+    URIComponents {
+        query,
+        ..components
+    }
 }
 
 /*
     A fragment identifier component is indicated by the presence of a
     number sign ("#") character and terminated by the end of the URI.
 */
-fn parse_fragment<'a>(
-    split: &Vec<&'a str>,
-    components: URIComponents<'a>
-) -> URIComponents<'a> {
+fn parse_fragment<'a>(split: &Vec<&'a str>, components: URIComponents<'a>) -> URIComponents<'a> {
     if split.len() != 2 {
         return components;
     }
     let fragment = Some(split[1]);
-    URIComponents { fragment, ..components }
+    URIComponents {
+        fragment,
+        ..components
+    }
 }
 
 /*
@@ -262,12 +260,11 @@ fn parse_fragment<'a>(
 */
 fn advance_phase<'a>(
     components: URIComponents<'a>,
-    delimiter: &str
+    delimiter: &str,
 ) -> Result<URIComponents<'a>, ParseURIError> {
-    let split: Vec<&str> =
-        components.tail
-            .splitn(2, delimiter)
-            .collect();
+    let split: Vec<&str> = components.tail
+        .splitn(2, delimiter)
+        .collect();
     let phase =
         match delimiter {
             ":" => parse_scheme(&split, components)?,
@@ -275,9 +272,9 @@ fn advance_phase<'a>(
             "/" => parse_path(&split, components)?,
             "?" => parse_query(&split, components),
             "#" => parse_fragment(&split, components),
-            _ => unreachable!()
+            _ => unreachable!(),
         };
-        
+
     let tail = *split.last().unwrap();
     Ok(URIComponents { tail, ..phase })
 }
@@ -286,18 +283,18 @@ fn structure_components(
     supposed_uri: &str
 ) -> Result<URIComponents, ParseURIError> {
     /*
-        The generic syntax uses the slash ("/"), question mark ("?"), and
-        number sign ("#") characters to delimit components that are
-        significant 
-   */
-    let interest = vec! [":", "//", "/", "?", "#"];
+         The generic syntax uses the slash ("/"), question mark ("?"), and
+         number sign ("#") characters to delimit components that are
+         significant
+    */
+    let interest = [":", "//", "/", "?", "#"];
     let mut interest = VecDeque::from(interest);
     let initial_phase = URIComponents::new(supposed_uri);
 
     let mut phase = initial_phase;
     while let Some(delimiter) = interest.pop_front() {
         phase = advance_phase(phase, delimiter)?;
-    };
+    }
     Ok(phase)
 }
 
@@ -309,7 +306,7 @@ impl<'a> URIComponents<'a> {
             authority: None,
             path: None,
             query: None,
-            fragment: None
+            fragment: None,
         }
     }
 }
@@ -320,23 +317,21 @@ impl<'a> From<URIComponents<'a>> for URI {
             scheme: String::from(components.scheme.unwrap()),
             authority: match components.authority {
                 Some(authority) => {
-                    let default_port =
-                        match components.scheme {
-                            Some("http") => 80,
-                            Some("https") => 443,
-                            Some("ftp") => 21,
-                            Some("ldap") => 389,
-                            Some("mailto") => 0,
-                            _ => 0,
-                        } as u16;
+                    let default_port = match components.scheme {
+                        Some("http") => 80,
+                        Some("https") => 443,
+                        Some("ftp") => 21,
+                        Some("ldap") => 389,
+                        Some("mailto") => 0,
+                        _ => 0,
+                    } as u16;
                     Authority::try_from((authority, default_port)).ok()
-                },
-                None =>
-                    None,
+                }
+                None => None,
             },
             path: String::from(components.path.unwrap()),
             query: components.query.map(str::to_string),
-            fragment: components.fragment.map(str::to_string)
+            fragment: components.fragment.map(str::to_string),
         }
     }
 }
@@ -344,8 +339,7 @@ impl<'a> From<URIComponents<'a>> for URI {
 impl TryFrom<&str> for URI {
     type Error = ParseURIError;
     fn try_from(value: &str) -> Result<URI, Self::Error> {
-        let phase =
-            structure_components(value)?;
+        let phase = structure_components(value)?;
         Ok(URI::from(phase))
     }
 }
@@ -360,23 +354,20 @@ impl URI {
         authority: Option<Authority>,
         path: &str,
         query: Option<&str>,
-        fragment: Option<&str>
+        fragment: Option<&str>,
     ) -> URI {
         URI {
             scheme: String::from(scheme),
             authority,
             path: String::from(path),
             query: query.map(str::to_string),
-            fragment: fragment.map(str::to_string)
+            fragment: fragment.map(str::to_string),
         }
     }
 }
 
 impl Display for ParseURIError {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ParseURIError::ErroneousScheme => write!(f, "scheme not found."),
             ParseURIError::ErroneousPath => write!(f, "path not found."),
@@ -384,44 +375,29 @@ impl Display for ParseURIError {
     }
 }
 
-impl Error for ParseURIError { }
+impl Error for ParseURIError {}
 
 impl<'a> Display for ParseAuthorityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseAuthorityError::InvalidPort => 
-                write!(
-                    f,
-                    "error parsing port into number."
-                ),
-            ParseAuthorityError::InvalidIPV6 =>
-                write!(
-                    f, 
-                    "error parsing ipv6 address. no closing ] found."
-                )
+            ParseAuthorityError::InvalidPort => write!(f, "error parsing port into number."),
+            ParseAuthorityError::InvalidIPV6 => write!(f, "error parsing ipv6 address. no closing ] found.")
         }
     }
 }
 
-impl Error for ParseAuthorityError { }
+impl Error for ParseAuthorityError {}
 
 impl Authority {
-    pub fn from_components(
-        host: &str,
-        port: u16,
-        user_info: Option<&str>
-    ) -> Authority {
-        let user_info =
-            match user_info {
-                Some(user_info) =>
-                    Some(String::from(user_info)),
-                None =>
-                    None
-            };
+    pub fn from_components(host: &str, port: u16, user_info: Option<&str>) -> Authority {
+        let user_info = match user_info {
+            Some(user_info) => Some(String::from(user_info)),
+            None => None,
+        };
         Authority {
             host: String::from(host),
             port,
-            user_info
+            user_info,
         }
     }
 }
@@ -431,60 +407,51 @@ impl TryFrom<(&str, u16)> for Authority {
 
     fn try_from((value, default_port): (&str, u16)) -> Result<Self, Self::Error> {
         let index_of_at = value.find('@');
-/*
-        userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
-*/
-        let (user_info, tail) =
-            match index_of_at {
-                Some(at) =>
-                    (Some(String::from(&value[..at])), &value[at..]),
-                None =>
-                    (None, value)
-            };
+        /*
+                userinfo    = *( unreserved / pct-encoded / sub-delims / ":" )
+        */
+        let (user_info, tail) = match index_of_at {
+            Some(at) => (Some(String::from(&value[..at])), &value[at..]),
+            None => (None, value),
+        };
 
-/* 
-        A host identified by an Internet Protocol literal address, version 6
-        [RFC3513] or later, is distinguished by enclosing the IP literal
-        within square brackets ("[" and "]").  This is the only place where
-        square bracket characters are allowed in the URI syntax.  In
-        anticipation of future, as-yet-undefined IP literal address formats,
-        an implementation may use an optional version flag to indicate such a
-        format explicitly rather than rely on heuristic determination.
+        /*
+                A host identified by an Internet Protocol literal address, version 6
+                [RFC3513] or later, is distinguished by enclosing the IP literal
+                within square brackets ("[" and "]").  This is the only place where
+                square bracket characters are allowed in the URI syntax.  In
+                anticipation of future, as-yet-undefined IP literal address formats,
+                an implementation may use an optional version flag to indicate such a
+                format explicitly rather than rely on heuristic determination.
 
-            IP-literal = "[" ( IPv6address / IPvFuture  ) "]"
-*/
-        let tail =
-            if tail.starts_with('[') {
-                match tail.find(']') {
-                    Some(i) => &tail[i+1..],
-                    None => return Err(ParseAuthorityError::InvalidIPV6),
-                }
-            } else {
-                tail
-            };
+                    IP-literal = "[" ( IPv6address / IPvFuture  ) "]"
+        */
+        let tail = if tail.starts_with('[') {
+            match tail.find(']') {
+                Some(i) => &tail[i + 1..],
+                None => return Err(ParseAuthorityError::InvalidIPV6),
+            }
+        } else {
+            tail
+        };
 
         let index_of_colon = tail.find(':');
-        let (host, port) =
-            match index_of_colon {
-                Some(colon) => {
-                    let host = &tail[..colon];
-                    let port =
-                    tail[colon+1..]
-                            .parse::<u16>()
-                            .map_err(|_e| ParseAuthorityError::InvalidPort)?;
-                    (String::from(host), port)
-                },
-                None =>
-                    (String::from(value), default_port),
-            };
-
-        Ok(
-            Authority {
-                host,
-                port,
-                user_info
+        let (host, port) = match index_of_colon {
+            Some(colon) => {
+                let host = &tail[..colon];
+                let port = tail[colon + 1..]
+                    .parse::<u16>()
+                    .map_err(|_e| ParseAuthorityError::InvalidPort)?;
+                (String::from(host), port)
             }
-        )
+            None => (String::from(value), default_port),
+        };
+
+        Ok(Authority {
+            host,
+            port,
+            user_info,
+        })
     }
 }
 
@@ -496,61 +463,122 @@ mod tests {
 
     #[test]
     fn exec() {
-        let uris: Vec<(&str, Option<URI>)> = 
-            vec! [
-                (
-                    "ldap://[2001:db8::7]/c=GB?objectClass?one",
-                    Some(URI::from_components("ldap", Some(Authority::from_components("[2001:db8::7]", 389, None)), "/c=GB", Some("objectClass?one"), None))
-                ),
-                (
-                    "http://httpbin.org/a/b/c?123#doreme",
-                    Some(
-                        URI::from_components(
-                            "http",
-                            Some(Authority::from_components("httpbin.org", 80, None)),
-                            "/a/b/c",
-                            Some("123"),
-                            Some("doreme")
-                        )
-                    )
-                ),
-                (
-                    "http://httpbin.org/a/b/c/?123#doreme",
-                    Some(URI::from_components("http", Some(Authority::from_components("httpbin.org", 80, None)), "/a/b/c/", Some("123"), Some("doreme")))
-                ),
-                (
-                    "http://httpbin.org/get?a=1&b=2&c=3#hash",
-                    Some(URI::from_components("http", Some(Authority::from_components("httpbin.org", 80, None)), "/get", Some("a=1&b=2&c=3"), Some("hash")))
-                ),
-                (
-                    "ftp://ftp.is.co.za/rfc/rfc1808.txt",
-                    Some(URI::from_components("ftp", Some(Authority::from_components("ftp.is.co.za", 21, None)), "/rfc/rfc1808.txt", None, None))
-                ),
-                (
-                    "http://www.ietf.org/rfc/rfc2396.txt",
-                    Some(URI::from_components("http", Some(Authority::from_components("www.ietf.org", 80, None)), "/rfc/rfc2396.txt", None, None))
-                ),
-                (
-                    "mailto:John.Doe@example.com",
-                    Some(URI::from_components("mailto", None, "John.Doe@example.com", None, None))
-                ),
-                (
-                    "news:comp.infosystems.www.servers.unix",
-                    Some(URI::from_components("news", None, "comp.infosystems.www.servers.unix", None, None))
-                ),
-                (
-                    "tel:+1-816-555-1212",
-                    Some(URI::from_components("tel", None, "+1-816-555-1212", None, None))
-                ),
-                (
-                    "telnet://192.0.2.16:80/",
-                    Some(URI::from_components("telnet", Some(Authority::from_components("192.0.2.16", 80, None)), "/", None, None))
-                ),
-                (
-                    "urn:oasis:names:specification:docbook:dtd:xml:4.1.2",
-                    Some(URI::from_components("urn", None, "oasis:names:specification:docbook:dtd:xml:4.1.2", None, None))
-                )
-            ];
+        let uris: Vec<(&str, Option<URI>)> = vec![
+            (
+                "https://en.wikipedia.org/wiki/The_Secret_of_the_Golden_Flower#/media/File:Stage1.gif",
+                Some(URI::from_components("https", Some(Authority::from_components("en.wikipedia.org", 443, None)), "/wiki/The_Secret_of_the_Golden_Flower", None, Some("/media/File:Stage1.gif")))
+            ),
+            (
+                "ldap://[2001:db8::7]/c=GB?objectClass?one",
+                Some(URI::from_components(
+                    "ldap",
+                    Some(Authority::from_components("[2001:db8::7]", 389, None)),
+                    "/c=GB",
+                    Some("objectClass?one"),
+                    None,
+                )),
+            ),
+            (
+                "http://httpbin.org/a/b/c?123#doreme",
+                Some(URI::from_components(
+                    "http",
+                    Some(Authority::from_components("httpbin.org", 80, None)),
+                    "/a/b/c",
+                    Some("123"),
+                    Some("doreme"),
+                )),
+            ),
+            (
+                "http://httpbin.org/a/b/c/?123#doreme",
+                Some(URI::from_components(
+                    "http",
+                    Some(Authority::from_components("httpbin.org", 80, None)),
+                    "/a/b/c/",
+                    Some("123"),
+                    Some("doreme"),
+                )),
+            ),
+            (
+                "http://httpbin.org/get?a=1&b=2&c=3#hash",
+                Some(URI::from_components(
+                    "http",
+                    Some(Authority::from_components("httpbin.org", 80, None)),
+                    "/get",
+                    Some("a=1&b=2&c=3"),
+                    Some("hash"),
+                )),
+            ),
+            (
+                "ftp://ftp.is.co.za/rfc/rfc1808.txt",
+                Some(URI::from_components(
+                    "ftp",
+                    Some(Authority::from_components("ftp.is.co.za", 21, None)),
+                    "/rfc/rfc1808.txt",
+                    None,
+                    None,
+                )),
+            ),
+            (
+                "http://www.ietf.org/rfc/rfc2396.txt",
+                Some(URI::from_components(
+                    "http",
+                    Some(Authority::from_components("www.ietf.org", 80, None)),
+                    "/rfc/rfc2396.txt",
+                    None,
+                    None,
+                )),
+            ),
+            (
+                "mailto:John.Doe@example.com",
+                Some(URI::from_components(
+                    "mailto",
+                    None,
+                    "John.Doe@example.com",
+                    None,
+                    None,
+                )),
+            ),
+            (
+                "news:comp.infosystems.www.servers.unix",
+                Some(URI::from_components(
+                    "news",
+                    None,
+                    "comp.infosystems.www.servers.unix",
+                    None,
+                    None,
+                )),
+            ),
+            (
+                "tel:+1-816-555-1212",
+                Some(URI::from_components(
+                    "tel",
+                    None,
+                    "+1-816-555-1212",
+                    None,
+                    None,
+                )),
+            ),
+            (
+                "telnet://192.0.2.16:80/",
+                Some(URI::from_components(
+                    "telnet",
+                    Some(Authority::from_components("192.0.2.16", 80, None)),
+                    "/",
+                    None,
+                    None,
+                )),
+            ),
+            (
+                "urn:oasis:names:specification:docbook:dtd:xml:4.1.2",
+                Some(URI::from_components(
+                    "urn",
+                    None,
+                    "oasis:names:specification:docbook:dtd:xml:4.1.2",
+                    None,
+                    None,
+                )),
+            ),
+        ];
 
         for (uri_s, expected_value) in uris {
             let uri = URI::try_parse(uri_s);
